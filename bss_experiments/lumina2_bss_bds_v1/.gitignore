@@ -1,0 +1,10 @@
+figures/generated/
+logs/
+metrics/*.csv
+tables/*.csv
+tables/*.tex
+schedules/**/*.json
+reports/*.json
+*.pyc
+__pycache__/
+

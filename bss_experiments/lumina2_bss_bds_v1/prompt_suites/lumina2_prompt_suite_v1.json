@@ -1,0 +1,94 @@
+{
+  "suite_id": "lumina2_prompt_suite_v1",
+  "model_id": "Lumina-Image-2.0",
+  "purpose": "Fixed safe T2I scheduler-naturalness sanity suite. Do not cherry-pick after seeing outputs.",
+  "seed": 0,
+  "smoke_prompt": {
+    "case_id": "smoke_official_water_reflection",
+    "category": "official_like",
+    "prompt": "A serene photograph capturing the golden reflection of the sun on a vast expanse of water."
+  },
+  "prompts": [
+    {
+      "case_id": "p01_simple_object",
+      "category": "simple object",
+      "prompt": "A single red ceramic teapot on a matte gray table, soft studio light, centered composition."
+    },
+    {
+      "case_id": "p02_animal",
+      "category": "animal",
+      "prompt": "A border collie standing in a field of short grass, clear daylight, natural colors."
+    },
+    {
+      "case_id": "p03_human_action",
+      "category": "human action",
+      "prompt": "A chef tossing vegetables in a wok inside a clean restaurant kitchen, motion frozen, realistic lighting."
+    },
+    {
+      "case_id": "p04_indoor_scene",
+      "category": "indoor scene",
+      "prompt": "A quiet reading room with wooden shelves, a green armchair, and afternoon light through tall windows."
+    },
+    {
+      "case_id": "p05_outdoor_landscape",
+      "category": "outdoor landscape",
+      "prompt": "A wide mountain lake at sunrise with pine trees along the shore and low mist above the water."
+    },
+    {
+      "case_id": "p06_high_frequency_texture",
+      "category": "high-frequency texture",
+      "prompt": "A close view of woven blue and white fabric, crisp thread detail, even lighting."
+    },
+    {
+      "case_id": "p07_lighting_heavy",
+      "category": "lighting-heavy scene",
+      "prompt": "A glass vase on a windowsill casting bright caustic patterns across a white wall."
+    },
+    {
+      "case_id": "p08_text_sign",
+      "category": "text/sign prompt",
+      "prompt": "A small street sign that clearly reads LUMINA LAB, mounted on a brick wall."
+    },
+    {
+      "case_id": "p09_surreal_fantasy",
+      "category": "surreal fantasy",
+      "prompt": "A floating island with a tiny lighthouse above a sea of clouds, detailed fantasy illustration."
+    },
+    {
+      "case_id": "p10_architecture",
+      "category": "architecture",
+      "prompt": "A modern library atrium with concrete columns, skylights, and people studying at long tables."
+    },
+    {
+      "case_id": "p11_food_product",
+      "category": "food/product",
+      "prompt": "A fresh lemon tart on a white plate with a silver fork and a linen napkin, product photography."
+    },
+    {
+      "case_id": "p12_macro",
+      "category": "close-up macro",
+      "prompt": "A macro photograph of dew drops on a green leaf, shallow depth of field, sharp foreground detail."
+    },
+    {
+      "case_id": "p13_reflection",
+      "category": "reflection/water/glass",
+      "prompt": "A rain-covered city street at night with neon reflections in puddles and glass storefronts."
+    },
+    {
+      "case_id": "p14_complex_composition",
+      "category": "complex composition",
+      "prompt": "A busy open-air market with fruit stalls, bicycles, hanging lamps, and shoppers in layered depth."
+    },
+    {
+      "case_id": "p15_low_light",
+      "category": "low-light scene",
+      "prompt": "A candlelit dinner table in a dark room with warm highlights and deep soft shadows."
+    },
+    {
+      "case_id": "p16_colorful_abstract",
+      "category": "colorful abstract scene",
+      "prompt": "A colorful abstract composition of translucent geometric shapes, balanced contrast, clean edges."
+    }
+  ]
+}
+

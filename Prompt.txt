@@ -1,0 +1,1010 @@
+可以。**Lumina-Image 2.0 很适合做这个 scheduler-naturalness probe**：它是 2025 的 2.6B Unified Next-DiT / flow-based T2I 模型，官方 repo 明确有 `transport/`、`sample.py`、Diffusers 支持，并且 README 写了 native inference 支持 **Midpoint / Euler / DPM Solver**；Diffusers 文档里 `Lumina2Pipeline` 默认使用 `FlowMatchEulerDiscreteScheduler`，`__call__` 也支持 `num_inference_steps` 和 `sigmas` 参数。([GitHub][1])
+
+Pro6000 Blackwell 单卡也很适合先试：公开规格是 96GB GDDR7 VRAM、600W、24,064 CUDA cores；Lumina-Image 2.0 是 2.6B 参数，官方 README 也展示了 1024 分辨率、Gemma-2-2B text encoder、FLUX-VAE-16CH 的模型配置，并在 Diffusers 示例里建议显存不够时 `enable_model_cpu_offload()`。([The Verge][2])
+
+下面这份是给本地 Codex 的完整 prompt。它遵循你现在的工程习惯：**代码托管 GitHub，权重和大输出放 Google Drive，Colab notebook 拉代码、挂 Drive、加载权重并运行**。我把目标设计成两层：先做 **native Lumina scheduler audit + smoke**，再做 **Euler / Midpoint / DPM 的 BSS/BDS 小实验**。如果 native patch 太难，Diffusers 作为 fallback。
+
+````text
+You are working on a new scheduler-naturalness experiment for our BSS/BDS project.
+
+Primary target:
+Lumina-Image 2.0 official repository:
+https://github.com/Alpha-VLLM/Lumina-Image-2.0
+
+Primary model:
+Alpha-VLLM/Lumina-Image-2.0
+
+Scientific purpose:
+We want to test whether BSS works better when the scheduler is “natural” for boundary interval splitting.
+
+Background:
+Our current BSS/BDS results:
+- Relit-LiVE: Green. Euler-like FlowMatch scheduler, strong physical/spatial relighting condition.
+- UniLumos: Low-only. Path-consistency / shifted-sigma / multistep scheduler.
+- Wan2.1-T2V-1.3B: Low-only. Generic video DiT, prompt-dependent, official UniPC/DPM++-style sampling.
+- Sana-0.6B: Reject. Text-only image generation, compressed efficient T2I system.
+- FLUX.1 Fill-dev: Provisional Low-only. Image fill with source image + mask, but dynamic shift / guidance-distilled path.
+
+Hypothesis:
+BSS is most meaningful when the boundary midpoint is inserted in the scheduler’s natural integration coordinate.
+Lumina-Image 2.0 is a good probe because the official repo supports multiple solvers:
+- Midpoint Solver
+- Euler Solver
+- DPM Solver
+
+We want to compare:
+- Lumina-Euler + BSS
+- Lumina-Midpoint + BSS
+- Lumina-DPM + BSS, if feasible
+
+Core claim to test:
+If BSS is scheduler-natural, Euler or native transport-time BSS should perform better than naive BSS under solvers whose geometry does not match midpoint splitting.
+
+Important:
+Do NOT train anything.
+Do NOT modify model weights.
+Do NOT commit model weights, generated images, or large outputs to GitHub.
+Do NOT store Hugging Face tokens in code.
+Do NOT claim BSS is universal.
+This is a quick scheduler-naturalness probe, not a SOTA T2I benchmark.
+
+Engineering rule:
+- GitHub/local repo stores code, scripts, notebook, manifests, patches, small reports.
+- Google Drive stores weights, generated images, metrics outputs, figures, and large artifacts.
+- Colab notebook clones/pulls GitHub code into /content, mounts Drive, locates Lumina weights from Drive, and runs the experiment.
+
+Recommended experiment repo:
+Use an existing lightweight experiment repo or create:
+`BSS-Scheduler-Experiments`
+
+Branch:
+`lumina2-bss-bds`
+
+Create experiment folder:
+
+`bss_experiments/lumina2_bss_bds_v1/`
+
+with:
+- reports/
+- tables/
+- metrics/
+- figures/
+- figures/side_by_side/
+- schedules/
+- manifests/
+- logs/
+- scripts/
+- patches/
+- splits/
+- prompt_suites/
+- notebooks/
+
+If running in Colab, mirror final artifacts to:
+
+`/content/drive/MyDrive/Colab_Projects/Lumina2-BSS-BDS/lumina2_bss_bds_v1/`
+
+Weights should live in Drive, for example:
+
+`/content/drive/MyDrive/ModelWeights/Lumina-Image-2.0/`
+
+============================================================
+PHASE 0 — Repo, model, hardware, and weight audit
+============================================================
+
+Create:
+
+`reports/00_repo_model_hardware_audit.md`
+
+Audit and report:
+- current experiment repo path
+- git remote
+- current branch
+- commit hash
+- dirty status
+- Python version
+- PyTorch version
+- CUDA version
+- diffusers version
+- transformers version
+- accelerate version
+- output of `nvidia-smi`
+- GPU name and VRAM
+- whether this is RTX PRO 6000 Blackwell or another GPU
+- whether running in Colab
+- whether Google Drive is mounted
+- whether Hugging Face token is available through environment / Colab secret
+- whether Gemma-2-2B access/auth is needed and available
+- whether local Drive weights exist at:
+  `/content/drive/MyDrive/ModelWeights/Lumina-Image-2.0/`
+- whether official Lumina repo exists locally
+- whether native files exist:
+  - `sample.py`
+  - `demo.py`
+  - `transport/`
+  - `transport/integrators.py`
+  - `transport/transport.py`
+  - `transport/dpm_solver.py`
+  - `scripts/sample.sh`
+- whether diffusers route works:
+  - `from diffusers import Lumina2Pipeline`
+  - `Lumina2Pipeline.from_pretrained(...)`
+- whether native repo supports solvers:
+  - midpoint
+  - euler
+  - dpm
+- default values found in `scripts/sample.sh`, especially:
+  - `steps`
+  - `solver`
+  - `time_shifting_factor`
+  - `cfg_scale`
+  - `resolution`
+- Diffusers defaults and call signature:
+  - `num_inference_steps`
+  - `guidance_scale`
+  - `cfg_trunc_ratio`
+  - `cfg_normalization`
+  - `sigmas`
+  - `max_sequence_length`
+- model size / checkpoint format:
+  - native `.pth` checkpoint
+  - diffusers model folder
+  - FLUX-VAE-16CH
+  - Gemma-2-2B text encoder
+- exact model path that will be loaded
+- dtype used, preferably bfloat16
+- whether CPU offload is needed
+- whether flash-attn is installed / required
+- whether using native backend or diffusers backend first
+
+Important:
+If weights are missing:
+- stop after audit;
+- write exact commands to download weights to Google Drive;
+- do not download weights into GitHub repo.
+
+Example download command should be placed in the notebook but not automatically executed unless `DOWNLOAD_WEIGHTS=True`:
+
+```bash
+huggingface-cli download Alpha-VLLM/Lumina-Image-2.0 \
+  --local-dir /content/drive/MyDrive/ModelWeights/Lumina-Image-2.0 \
+  --local-dir-use-symlinks False
+````
+
+If Gemma-2-2B access requires auth:
+
+* document it clearly;
+* do not hardcode token.
+
+============================================================
+PHASE 1 — Colab notebook workflow
+=================================
+
+Create:
+
+`notebooks/lumina2_colab_bss_bds.ipynb`
+
+Notebook sections:
+
+1. Mount Drive:
+
+```python
+from google.colab import drive
+drive.mount("/content/drive")
+```
+
+2. Define paths:
+
+```python
+GITHUB_REPO_URL = "https://github.com/<YOUR_ORG_OR_USER>/BSS-Scheduler-Experiments.git"
+BRANCH = "lumina2-bss-bds"
+EXPERIMENT_REPO_ROOT = "/content/BSS-Scheduler-Experiments"
+LUMINA_UPSTREAM_ROOT = "/content/Lumina-Image-2.0"
+DRIVE_ROOT = "/content/drive/MyDrive/Colab_Projects/Lumina2-BSS-BDS"
+DRIVE_WEIGHTS_ROOT = "/content/drive/MyDrive/ModelWeights/Lumina-Image-2.0"
+EXPERIMENT_ROOT = "/content/Lumina2-BSS-Runs/lumina2_bss_bds_v1"
+DRIVE_EXPERIMENT_ROOT = "/content/drive/MyDrive/Colab_Projects/Lumina2-BSS-BDS/lumina2_bss_bds_v1"
+```
+
+3. Clone or pull GitHub experiment repo:
+
+* clone if missing
+* checkout branch
+* print git status
+
+4. Clone or pull official Lumina repo:
+
+```bash
+git clone https://github.com/Alpha-VLLM/Lumina-Image-2.0.git /content/Lumina-Image-2.0
+```
+
+if missing.
+
+5. Install dependencies:
+
+* first try minimal:
+
+```bash
+pip install -U diffusers transformers accelerate safetensors sentencepiece huggingface_hub opencv-python pillow imageio pandas numpy matplotlib
+```
+
+* if native route needs official requirements:
+
+```bash
+pip install -r /content/Lumina-Image-2.0/requirements.txt
+```
+
+* do not reinstall PyTorch unless required.
+* flash-attn is optional; audit first. If unavailable, use diffusers/offload or native fallback.
+
+6. Run audit:
+
+```bash
+python bss_experiments/lumina2_bss_bds_v1/scripts/audit_lumina2.py \
+  --lumina_root /content/Lumina-Image-2.0 \
+  --weights_root /content/drive/MyDrive/ModelWeights/Lumina-Image-2.0 \
+  --experiment_root /content/Lumina2-BSS-Runs/lumina2_bss_bds_v1
+```
+
+7. Build manifests:
+
+```bash
+python bss_experiments/lumina2_bss_bds_v1/scripts/make_manifest_lumina2_bds.py \
+  --experiment_root /content/Lumina2-BSS-Runs/lumina2_bss_bds_v1
+```
+
+8. Run smoke:
+
+```bash
+python bss_experiments/lumina2_bss_bds_v1/scripts/run_manifest.py \
+  --manifest /content/Lumina2-BSS-Runs/lumina2_bss_bds_v1/manifests/lumina2_smoke_manifest.csv \
+  --resume \
+  --sync_drive
+```
+
+9. Run mini-suite only if:
+
+```python
+RUN_MINI_SUITE = True
+```
+
+Notebook must not run the full mini-suite automatically by default.
+
+============================================================
+PHASE 2 — Backend design: native first, diffusers fallback
+==========================================================
+
+Implement a unified adapter:
+
+`scripts/lumina2_adapter.py`
+
+Required class:
+
+```python
+class Lumina2Adapter:
+    def __init__(
+        self,
+        backend,
+        lumina_root,
+        weights_root,
+        experiment_root,
+        device,
+        dtype,
+        solver,
+        resolution,
+        cfg_scale,
+        time_shifting_factor,
+        hf_token=None,
+    ):
+        ...
+
+    def load_pipeline(self):
+        ...
+
+    def get_official_base_schedule(self, num_steps, solver, **kwargs):
+        ...
+
+    def build_uniform_schedule(self, actual_nfe, solver, **kwargs):
+        ...
+
+    def build_bss_schedule(self, actual_nfe, solver, split_pairs=(0, -1), coordinate_mode="native", **kwargs):
+        ...
+
+    def run_one_case(self, manifest_row):
+        ...
+
+    def dump_schedule_json(self, manifest_row, schedule_payload):
+        ...
+
+    def validate_outputs(self, manifest_row):
+        ...
+```
+
+Backend priority:
+
+A. Native Lumina backend
+
+* Use official `sample.py` / transport sampler.
+* Prefer native backend because official repo explicitly supports Midpoint / Euler / DPM solvers.
+* Audit exact functions before patching.
+* Patch minimally to accept custom time grid for Euler/Midpoint if possible.
+* For DPM solver, only add BSS if custom schedule can be inserted correctly; otherwise mark DPM as audit-only.
+
+B. Diffusers backend
+
+* Use `Lumina2Pipeline`.
+* It uses `FlowMatchEulerDiscreteScheduler`.
+* It supports `num_inference_steps` and possibly `sigmas`.
+* Use as fallback or as an additional scheduler-naturalness comparison.
+* If diffusers is used, record scheduler class and coordinate type.
+
+Do not force a backend if schedule injection is unsafe.
+If neither backend can support custom BSS schedule safely, stop and report.
+
+============================================================
+PHASE 3 — BSS schedule and coordinate modes
+===========================================
+
+Goal:
+Implement scheduler-natural BSS, not just arbitrary midpoint.
+
+BSS definition:
+For target actual NFE T:
+
+* base_sample_steps = T - 2
+* build official base schedule using the chosen solver/backend
+* split first interval
+* split last interval
+* run exactly T model evaluations
+
+Required BSS variants:
+
+1. `bss_native`
+
+* midpoint in the native integration coordinate used by the chosen backend.
+* For native Euler/Midpoint, this is likely transport time t in [0,1].
+* For diffusers FlowMatchEuler, this may be scheduler sigmas/timesteps.
+
+2. `bss_index`
+
+* midpoint by step index / unshifted uniform time.
+* Use only for audit/ablation if cheap.
+
+3. `bss_solver_coordinate`
+
+* for DPM-like solver, attempt lambda/logSNR/solver-natural coordinate only if implemented safely.
+* If not feasible, mark as not implemented.
+
+At minimum:
+
+* implement `uniform`
+* implement `bss_native` for Euler
+* implement `bss_native` for Midpoint if safe
+* audit DPM
+
+Schedule JSON must include:
+
+* model_id = Lumina-Image-2.0
+* setting = Image Generation
+* backend = native / diffusers
+* solver = euler / midpoint / dpm / flowmatch_euler
+* method
+* sampler_mode = uniform / bss
+* bss_variant = native / index / solver_coordinate
+* actual_nfe
+* base_sample_steps
+* num_sampling_steps
+* split_pairs = [0, -1]
+* reference_method = reference_uniform50 or reference_native50
+* reference_nfe = 50
+* coordinate_type = native_time / timestep / sigma / shifted_sigma / lambda / unknown
+* base_coords
+* final_coords
+* inserted_midpoints
+* time_shifting_factor
+* cfg_scale
+* cfg_trunc_ratio if diffusers
+* cfg_normalization if diffusers
+* prompt_hash
+* seed
+* height
+* width
+* output_path
+* git_commit
+* dirty_status
+* timestamp
+
+Validation:
+
+* uniform10 has 10 model evaluations
+* uniform20 has 20 model evaluations
+* uniform30 has 30 model evaluations
+* uniform40 has 40 model evaluations
+* reference50 has 50 model evaluations
+* bss10 = base8 + split first/last and has 10 evaluations
+* bss20 = base18 + split first/last and has 20 evaluations
+* bss30 = base28 + split first/last and has 30 evaluations
+* bss40 = base38 + split first/last and has 40 evaluations
+* BSS-T != uniform-T
+* same prompt / seed / cfg / resolution across methods
+
+If native midpoint solver has 2 function evaluations per step or ambiguous NFE:
+
+* explicitly define and count model evaluations, not integration intervals.
+* If model evaluations differ from step count, report NFE accurately and do not use that solver in same-NFE table until corrected.
+
+============================================================
+PHASE 4 — Prompt suite
+======================
+
+Create:
+
+`prompt_suites/lumina2_prompt_suite_v1.json`
+
+Use 16 safe fixed prompts.
+
+Purpose:
+
+* T2I scheduler-naturalness sanity check
+* not a public benchmark
+* do not cherry-pick after seeing outputs
+
+Prompt categories:
+
+1. simple object
+2. animal
+3. human action
+4. indoor scene
+5. outdoor landscape
+6. high-frequency texture
+7. lighting-heavy scene
+8. text/sign prompt
+9. surreal fantasy
+10. architecture
+11. food/product
+12. close-up macro
+13. reflection/water/glass
+14. complex composition
+15. low-light scene
+16. colorful abstract scene
+
+Also create smoke prompt:
+Use the official Lumina diffusers example prompt if possible:
+“A serene photograph capturing the golden reflection of the sun on a vast expanse of water.”
+or another official README prompt found during audit.
+
+Use:
+
+* seed = 0 for prompt suite
+* fixed seed across methods
+* resolution = 1024x1024 first
+* if OOM, allow 768x768 but document clearly
+
+============================================================
+PHASE 5 — Build manifests
+=========================
+
+Create:
+
+`scripts/make_manifest_lumina2_bds.py`
+
+Create smoke manifest:
+
+`manifests/lumina2_smoke_manifest.csv`
+
+Rows:
+
+* official / README prompt
+* solver = euler
+* uniform8
+* uniform10
+* bss10_native
+* reference_uniform50
+
+Create mini-suite manifest:
+
+`manifests/lumina2_prompt_suite_manifest.csv`
+
+Preferred rows:
+
+* 16 prompts
+* solver = euler
+* uniform8
+* uniform10
+* uniform20
+* uniform30
+* uniform40
+* reference_uniform50
+* bss10_native
+* bss20_native
+* bss30_native
+* bss40_native
+
+Optional solver ablation:
+
+* 4 prompts only
+* solver = midpoint
+* uniform10
+* bss10_native
+* uniform40
+* bss40_native
+* reference50
+* solver = dpm if custom schedule safe:
+  uniform10 / bss10 / uniform40 / bss40 / reference50
+
+If runtime is high:
+
+* reduce mini-suite to 8 prompts first
+* keep exact same-NFE points needed for table: 10,20,30,40 if possible
+* if 30 missing, mark Middle High as --
+
+Manifest fields:
+
+* run_id
+* model_id = Lumina-Image-2.0
+* model_variant = 2.6B
+* setting = Image Generation
+* few_step_prior = None / inference-acceleration, not explicit few-step distillation
+* task = t2i
+* modality = image
+* protocol = fixed_prompt_suite_lumina2
+* backend = native / diffusers
+* solver = euler / midpoint / dpm / flowmatch_euler
+* bss_variant = native / index / none
+* case_id
+* prompt
+* prompt_hash
+* method
+* method_family = uniform / bss / reference
+* sampler_mode
+* actual_nfe
+* num_sampling_steps
+* base_sample_steps
+* split_pairs
+* time_shifting_factor
+* cfg_scale
+* cfg_trunc_ratio if diffusers
+* cfg_normalization if diffusers
+* seed
+* height
+* width
+* reference_method = reference_uniform50
+* reference_nfe = 50
+* low_baseline_method = uniform8
+* output_path
+* schedule_json_path
+* stdout_log_path
+* stderr_log_path
+* runtime_json_path
+* status
+* error_message
+* git_commit
+* dirty_status
+
+Default config:
+
+* height = 1024
+* width = 1024
+* cfg_scale = 4.0
+* time_shifting_factor = 6 if native sample.sh default is used
+* reference_nfe = 50
+* seed = 0
+* dtype = bfloat16
+
+============================================================
+PHASE 6 — Run smoke
+===================
+
+Run smoke first:
+
+* solver = euler
+* uniform8
+* uniform10
+* bss10_native
+* reference_uniform50
+
+After smoke:
+
+* validate outputs exist
+* validate schedule JSON
+* validate NFE counts
+* validate bss10 schedule
+* compute metrics against reference50
+* create side-by-side:
+  uniform8 | uniform10 | bss10 | reference50
+
+Write:
+`reports/01_lumina2_smoke_report.md`
+
+If smoke fails:
+
+* stop
+* report failure
+* do not run mini-suite
+
+============================================================
+PHASE 7 — Metrics
+=================
+
+Create:
+
+`scripts/compute_metrics_against_ref.py`
+
+For each prompt/case:
+
+* reference = uniform50
+* low baseline = uniform8
+* compute:
+
+  * RGB L1 to reference
+  * RGB L2 to reference
+  * PSNR to reference
+  * rgb_l1_closure:
+    `1 - d(method, ref) / d(uniform8, ref)`
+  * runtime
+  * actual NFE
+  * compute_fraction = actual_nfe / 50
+
+Optional if already installed:
+
+* LPIPS
+* DINO/CLIP image similarity to reference
+  But do not install heavy dependencies for first run.
+
+Write:
+
+* `metrics/master_long_metrics.csv`
+* `metrics/per_case_metrics.csv`
+* `metrics/same_compute_gain_long.csv`
+
+For BDS:
+
+* use exact same-NFE pairs only
+* do not interpolate
+* do not create matched-quality saving table
+
+============================================================
+PHASE 8 — Mini-suite run
+========================
+
+Only after smoke passes, run the mini-suite.
+
+Preferred:
+
+* 16 prompts
+* solver = euler
+* methods:
+
+  * uniform8
+  * uniform10
+  * uniform20
+  * uniform30
+  * uniform40
+  * reference_uniform50
+  * bss10_native
+  * bss20_native
+  * bss30_native
+  * bss40_native
+
+Use resume support.
+Run one row at a time.
+Dump runtime JSON and schedule JSON for every row.
+Sync output to Drive after each completed row if running in Colab.
+Do not overwrite unless `--force`.
+
+Write:
+`reports/02_mini_suite_run_report.md`
+
+============================================================
+PHASE 9 — BDS calibration / holdout
+===================================
+
+Create:
+
+`scripts/compute_bds.py`
+
+Use fixed prompt suite cases.
+
+Define:
+
+* BDS_low: Tset = {10}
+* BDS_all: Tset = {10,20,30,40} if all points available
+* If 30 missing, use {10,20,40} and mark Middle High missing
+
+Splits:
+
+1. first_half_split:
+
+   * first half prompts calibration
+   * second half holdout
+2. alternating_split:
+
+   * even-index prompts calibration
+   * odd-index holdout
+3. random_split_seed0:
+
+   * 50/50 split with seed 0
+
+For each split and Tset:
+
+* calibration mean gain
+* bootstrap 95% LCB
+* bootstrap 95% CI
+* calibration win rate
+* predicted verdict:
+
+  * Green if BDS_all LCB > 0
+  * Low-only if BDS_low LCB > 0 and BDS_all LCB <= 0
+  * Reject if BDS_low LCB <= 0
+  * Need more data if calibration intervals too wide
+* holdout mean gain
+* holdout win rate
+* confirmation flags:
+
+  * low_confirmed
+  * all_green_confirmed
+  * low_only_confirmed
+
+Use bootstrap over prompts/cases, not rows.
+
+Outputs:
+
+* `tables/tableA_lumina2_bds_by_split.csv`
+* `tables/tableA_lumina2_bds_by_split.md`
+* `tables/cross_model_bds_row.csv`
+* `tables/cross_model_bds_row.md`
+* `reports/03_bds_report.md`
+
+============================================================
+PHASE 10 — Scheduler geometry audit
+===================================
+
+Create:
+
+`scripts/scheduler_geometry_audit.py`
+
+For solvers:
+
+* euler
+* midpoint if available
+* dpm if available and safe
+
+For NFE:
+
+* 10
+* 20
+* 30
+* 40
+* 50
+
+Compute:
+
+* uniform coords
+* base coords
+* BSS coords
+* inserted midpoints
+* monotonicity
+* terminal gap
+* first gap
+* tail/front ratio
+* grid distance between BSS-T and uniform-T
+* coordinate type
+* whether custom schedule was transformed / shifted
+* whether NFE count equals model evaluation count
+
+Output:
+
+* `tables/table_scheduler_geometry_lumina2.csv`
+* `tables/table_scheduler_geometry_lumina2.md`
+* `figures/scheduler_coords_euler.png`
+* `figures/scheduler_coords_midpoint.png` if available
+* `reports/04_scheduler_geometry_audit.md`
+
+This audit is critical:
+We want to know whether BSS-native is truly scheduler-natural for Lumina2 Euler, and whether midpoint/DPM solvers make BSS less natural.
+
+============================================================
+PHASE 11 — Optional solver ablation
+===================================
+
+Only if Euler mini-suite runs and time remains.
+
+Run a 4-prompt solver ablation:
+
+* prompts:
+
+  * simple object
+  * high-frequency texture
+  * lighting-heavy
+  * complex composition
+* solvers:
+
+  * euler
+  * midpoint
+  * dpm only if BSS schedule injection is safe
+* methods:
+
+  * uniform10
+  * bss10_native
+  * uniform40
+  * bss40_native
+  * reference50
+
+Write:
+
+* `metrics/solver_ablation_same_compute_gain.csv`
+* `tables/table_solver_ablation_lumina2.md`
+* `reports/05_solver_ablation_report.md`
+
+Question:
+Does BSS response change across Euler / Midpoint / DPM under the same model and prompts?
+
+If Euler is positive but DPM is weaker/negative, this strongly supports scheduler-naturalness.
+
+============================================================
+PHASE 12 — Final cross-model same-compute row
+=============================================
+
+Create:
+
+* `tables/table_cross_model_same_compute_lumina2_row.csv`
+* `tables/table_cross_model_same_compute_lumina2_row.md`
+* `tables/table_cross_model_same_compute_lumina2_row.tex`
+
+The row must match our paper table format:
+
+Model | Setting | Few-step prior | Ref. | Cases | BDS | Low | Middle Low | Middle High | High | Mean Delta | Win
+
+For Lumina-Image 2.0:
+
+* Model = Lumina-Image 2.0
+* Setting = Image Generation
+* Few-step prior = None / inference-acceleration, not explicit few-step distillation
+* Ref. = 50
+* Cases = number of completed prompts
+* BDS = Green / Low-only / Reject / Need more data
+* Low = 10 NFE result
+* Middle Low = 20 NFE result
+* Middle High = 30 NFE result
+* High = 40 NFE result
+* Mean Delta = average available delta values
+* Win = BSS win rate over prompt × NFE observations
+
+Cell format:
+`0.xxx / +0.xxx [10 NFE]`
+or
+`0.xxx / -0.xxx [40 NFE]`
+
+If a cell is missing:
+
+* write `--`
+* document in final report
+* do not invent or interpolate
+
+============================================================
+PHASE 13 — Figures
+==================
+
+Generate:
+
+* `figures/compute_quality_rgb_closure.png`
+* `figures/compute_quality_rgb_closure.pdf`
+* `figures/scheduler_geometry_euler.png`
+
+Plot:
+
+* x-axis = NFE / reference_nfe
+* y-axis = rgb_l1_closure
+* uniform curve
+* BSS curve
+* mean over prompts
+* SEM if multiple prompts
+
+Generate image grid:
+
+* uniform8 | uniform10 | bss10 | reference50
+* uniform10 | bss10 | uniform20 | bss20 | uniform30 | bss30 | uniform40 | bss40 | reference50 if available
+
+Save:
+
+* `figures/side_by_side/index.html`
+
+============================================================
+PHASE 14 — Final report
+=======================
+
+Create:
+
+`reports/FINAL_LUMINA2_BSS_BDS_REPORT.md`
+
+Include:
+
+1. Purpose:
+   scheduler-naturalness T2I probe after Sana Reject and FLUX Low-only
+2. Repo/model/hardware audit
+3. Weight location and Drive setup
+4. Backend selected:
+
+   * native or diffusers
+   * why
+5. Solver selected:
+
+   * Euler for main row
+   * Midpoint/DPM audit if available
+6. Config selected:
+
+   * exact checkpoint path
+   * scheduler / solver
+   * time_shifting_factor
+   * cfg_scale
+   * resolution
+7. BSS schedule implementation summary
+8. Smoke result
+9. Mini-suite completion summary
+10. Same-compute RGB-L1 closure row
+11. BDS calibration/holdout result
+12. Scheduler geometry audit
+13. Optional solver ablation result
+14. Side-by-side examples
+15. Final verdict:
+
+* Green / Low-only / Reject / Need more data
+
+16. Whether this supports scheduler-naturalness hypothesis
+17. Whether this can be included in the cross-model paper table
+18. Caveats:
+
+* fixed prompt suite, not official benchmark
+* reference is uniform50, not ground truth
+* NFE as compute proxy
+* native vs diffusers backend may differ
+* Gemma access / text encoder auth
+* solver-specific schedule injection risk
+
+19. Next steps:
+
+* expand prompts if promising
+* compare Euler vs Midpoint vs DPM more carefully
+* try HiDream-I1-Full as SOTA stress if Lumina works
+
+Use cautious wording:
+
+* “Lumina-Image 2.0 T2I scheduler-naturalness probe”
+* “same-compute BSS vs uniform”
+* “BDS deployment certificate”
+* “no universal claim”
+
+Do not write:
+
+* “BSS universally works”
+* “BSS reaches official quality”
+* “BSS is guaranteed optimal”
+
+Final response to me should include:
+
+* repo commit
+* Colab notebook path
+* Drive weights path used
+* backend selected
+* solver selected
+* GPU audit
+* smoke pass/fail
+* schedule validation summary
+* mini-suite completion count
+* final paper-format row path
+* LaTeX row snippet path
+* BDS table path
+* scheduler geometry audit path
+* solver ablation path if run
+* final report path
+* final verdict
+* recommendation whether Lumina-Image 2.0 should be included in the table
+
+Do not push unless asked.
+
+```
+
+这次我建议主跑 **Euler**，因为它最能验证 “scheduler-natural boundary refinement”。如果 Euler 是 Low-only/Green，而 DPM 或 Midpoint 变弱，就非常支持我们现在的方向；如果 Euler 也 Reject，那就说明 scheduler-naturalness 不是唯一关键因素，Sana Reject 可能更多来自 text-only / reference multi-solution / latent codec / official path tuning。
+```
+
+[1]: https://github.com/Alpha-VLLM/Lumina-Image-2.0 "GitHub - Alpha-VLLM/Lumina-Image-2.0: Lumina-Image 2.0: A Unified and Efficient Image Generative Framework · GitHub"
+[2]: https://www.theverge.com/news/631868/nvidia-rtx-pro-6000-blackwell-gpu-professionals?utm_source=chatgpt.com "Nvidia's RTX Pro 6000 has 96GB of VRAM and 600W of power"

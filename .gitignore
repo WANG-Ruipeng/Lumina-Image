@@ -1,0 +1,23 @@
+.tmp_lumina2_check/
+__pycache__/
+*.pyc
+
+# Model weights and generated artifacts should stay out of git.
+ModelWeights/
+models/
+weights/
+checkpoints/
+*.ckpt
+*.safetensors
+*.pth
+*.pt
+
+# Experiment outputs.
+**/figures/generated/
+**/logs/
+**/metrics/*.csv
+**/tables/*.csv
+**/tables/*.tex
+**/schedules/**/*.json
+**/reports/*.json
+
