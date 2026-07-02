@@ -20,4 +20,4 @@ checkpoints/
 **/tables/*.tex
 **/schedules/**/*.json
 **/reports/*.json
-
+.tmp_patch_test/
