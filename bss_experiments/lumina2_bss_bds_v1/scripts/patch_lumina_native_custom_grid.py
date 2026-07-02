@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
+import traceback
 from pathlib import Path
 
 
@@ -164,4 +166,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(f"patch_lumina_native_custom_grid.py failed: {exc}", file=sys.stdout, flush=True)
+        traceback.print_exc(file=sys.stdout)
+        raise SystemExit(1)
