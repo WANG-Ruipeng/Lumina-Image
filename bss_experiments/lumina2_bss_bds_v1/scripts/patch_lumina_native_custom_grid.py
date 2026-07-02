@@ -15,6 +15,7 @@ def diagnostic_excerpt(text: str, label: str) -> str:
         "transport.sample_ode ode call": "time_shifting_factor=time_shifting_factor",
         "sample.py sample_ode call": "sample_fn = sampler.sample_ode",
         "sample.py parser argument": "--hf_token",
+        "sample.py model_args torch.load": "model_args.pth",
     }
     needle = probes.get(label, label.split()[0])
     idx = text.find(needle)
@@ -129,6 +130,15 @@ def patch_sample(path: Path) -> bool:
             r'help="Optional JSON schedule with final_coords for BSS.")'
         )
         text = replace_once(text, pattern, repl, "sample.py parser argument")
+    model_args_idx = text.find("model_args.pth")
+    if model_args_idx >= 0:
+        model_args_window = text[max(0, model_args_idx - 200) : model_args_idx + 300]
+        if "weights_only=False" not in model_args_window:
+            pattern = r"torch\.load\((?P<path>os\.path\.join\(args\.ckpt,\s*[\"']model_args\.pth[\"']\))\)"
+            repl = r"torch.load(\g<path>, weights_only=False)"
+            text = replace_once(text, pattern, repl, "sample.py model_args torch.load")
+
+
     if text != original:
         path.write_text(text, encoding="utf-8")
         return True
