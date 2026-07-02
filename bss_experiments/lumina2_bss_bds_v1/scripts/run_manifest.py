@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import os
@@ -11,6 +11,15 @@ from experiment_utils import ensure_dir, read_csv_rows, write_csv_rows
 from lumina2_adapter import adapter_from_manifest_row
 from make_manifest_lumina2_bds import MANIFEST_FIELDS
 
+
+def tail_file(path: Path, max_chars: int = 4000) -> str:
+    try:
+        if not path.exists():
+            return ""
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return f"<could not read {path}: {exc!r}>"
+    return text[-max_chars:]
 
 def sync_completed_artifacts(row: Dict[str, str], experiment_root: Path, drive_root: Path) -> None:
     for key in ["output_path", "schedule_json_path", "stdout_log_path", "stderr_log_path", "runtime_json_path"]:
@@ -83,9 +92,25 @@ def main() -> None:
             row["status"] = "failed"
             row["error_message"] = repr(exc)
             stderr_path = Path(row["stderr_log_path"])
+            stdout_path = Path(row["stdout_log_path"])
             ensure_dir(stderr_path.parent)
-            if not stderr_path.exists():
-                stderr_path.write_text(traceback.format_exc(), encoding="utf-8")
+            trace = traceback.format_exc()
+            if stderr_path.exists():
+                existing = stderr_path.read_text(encoding="utf-8", errors="replace")
+                stderr_path.write_text(existing + "\n\n--- run_manifest traceback ---\n" + trace, encoding="utf-8")
+            else:
+                stderr_path.write_text(trace, encoding="utf-8")
+            print(f"failed run_id={row.get('run_id', '')}: {exc}")
+            print(f"stdout_log_path={stdout_path}")
+            print(f"stderr_log_path={stderr_path}")
+            stderr_tail = tail_file(stderr_path)
+            stdout_tail = tail_file(stdout_path)
+            if stderr_tail:
+                print("\n--- stderr tail ---")
+                print(stderr_tail)
+            if stdout_tail:
+                print("\n--- stdout tail ---")
+                print(stdout_tail)
             updated.append(row)
             write_csv_rows(manifest_path, updated + rows[len(updated) :], MANIFEST_FIELDS)
             if not args.allow_failures:

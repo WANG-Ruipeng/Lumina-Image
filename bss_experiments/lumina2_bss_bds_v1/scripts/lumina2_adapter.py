@@ -25,6 +25,12 @@ from experiment_utils import (
 )
 
 
+def tail_text(text: str, max_chars: int = 4000) -> str:
+    if not text:
+        return ""
+    return text[-max_chars:]
+
+
 class Lumina2Adapter:
     def __init__(
         self,
@@ -391,7 +397,20 @@ class Lumina2Adapter:
             },
         )
         if status != "completed":
-            raise RuntimeError(f"Native Lumina command failed for {row['run_id']}; see {stderr_path}")
+            details = [
+                f"Native Lumina command failed for {row['run_id']} with returncode={proc.returncode}.",
+                f"stdout_log_path={stdout_path}",
+                f"stderr_log_path={stderr_path}",
+            ]
+            if proc.returncode == 0 and not source_image:
+                details.append(f"No output image was found under {output_dir}.")
+            stderr_tail = tail_text(proc.stderr)
+            stdout_tail = tail_text(proc.stdout)
+            if stderr_tail:
+                details.append(f"STDERR tail:\n{stderr_tail}")
+            if stdout_tail:
+                details.append(f"STDOUT tail:\n{stdout_tail}")
+            raise RuntimeError("\n".join(details))
         return {"status": status, "runtime_sec": elapsed, "output_path": str(output_path)}
 
     def _find_native_output_image(self, output_dir: Path) -> Optional[Path]:
