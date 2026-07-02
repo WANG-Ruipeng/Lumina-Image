@@ -40,7 +40,7 @@ def replace_once(text: str, pattern: str, repl: str, label: str, flags: int = 0)
 def add_param_after_time_shift(text: str, label: str) -> str:
     if "custom_time_grid=None" in text:
         return text
-    pattern = r"(?P<indent>[ \t]*)time_shifting_factor=None,\n(?P=indent)\):"
+    pattern = r"(?P<indent>[ \t]*)time_shifting_factor=None,[ \t]*\n(?P=indent)\):"
     repl = r"\g<indent>time_shifting_factor=None,\n\g<indent>custom_time_grid=None,\n\g<indent>):"
     return replace_once(text, pattern, repl, label)
 
@@ -77,7 +77,7 @@ def patch_transport(path: Path) -> bool:
     original = text
     text = add_param_after_time_shift(text, "transport.sample_ode signature")
     if "custom_time_grid=custom_time_grid" not in text:
-        pattern = r"(?P<indent>[ \t]*)time_shifting_factor=time_shifting_factor,\n(?P=indent)\)"
+        pattern = r"(?P<indent>[ \t]*)time_shifting_factor=time_shifting_factor,[ \t]*\n(?P=indent)\)"
         repl = (
             r"\g<indent>time_shifting_factor=time_shifting_factor,\n"
             r"\g<indent>custom_time_grid=custom_time_grid,\n"
@@ -96,7 +96,7 @@ def patch_sample(path: Path) -> bool:
     if "custom_time_grid=custom_time_grid" not in text:
         pattern = (
             r"(?P<indent>[ \t]*)sample_fn = sampler\.sample_ode\(\n"
-            r"(?P<body>(?:(?!\n(?P=indent)\)).)*?time_shifting_factor=args\.t_shift,?\n)"
+            r"(?P<body>(?:(?!\n(?P=indent)\)).)*?time_shifting_factor=args\.t_shift,?[ \t]*\n)"
             r"(?P=indent)\)"
         )
         repl = (
@@ -111,7 +111,7 @@ def patch_sample(path: Path) -> bool:
         )
         text = replace_once(text, pattern, repl, "sample.py sample_ode call", flags=re.DOTALL)
         text = re.sub(
-            r"(time_shifting_factor=args\.t_shift),?\n(?P<indent>[ \t]*custom_time_grid=custom_time_grid,)",
+            r"(time_shifting_factor=args\.t_shift),?[ \t]*\n(?P<indent>[ \t]*custom_time_grid=custom_time_grid,)",
             r"\1,\n\g<indent>",
             text,
             count=1,
