@@ -5,10 +5,33 @@ import re
 from pathlib import Path
 
 
+def diagnostic_excerpt(text: str, label: str) -> str:
+    probes = {
+        "integrators.ode signature": "time_shifting_factor",
+        "integrators.ode time grid": "self.t = th.linspace",
+        "transport.sample_ode signature": "def sample_ode",
+        "transport.sample_ode ode call": "time_shifting_factor=time_shifting_factor",
+        "sample.py sample_ode call": "sample_fn = sampler.sample_ode",
+        "sample.py parser argument": "--hf_token",
+    }
+    needle = probes.get(label, label.split()[0])
+    idx = text.find(needle)
+    if idx < 0:
+        return f"Could not find diagnostic needle {needle!r}. File starts with:\n{text[:800]}"
+    start = max(0, idx - 400)
+    end = min(len(text), idx + 1000)
+    return text[start:end]
+
+
 def replace_once(text: str, pattern: str, repl: str, label: str, flags: int = 0) -> str:
     new_text, count = re.subn(pattern, repl, text, count=1, flags=flags)
     if count != 1:
-        raise RuntimeError(f"Patch anchor not found for {label}")
+        excerpt = diagnostic_excerpt(text, label)
+        raise RuntimeError(
+            f"Patch anchor not found for {label}.\n"
+            f"Pattern: {pattern}\n"
+            f"Diagnostic excerpt:\n{excerpt}"
+        )
     return new_text
 
 
@@ -128,11 +151,15 @@ def main() -> None:
         for label, path in targets.items():
             print(label, "exists", path)
         return
-    changed = {
-        "integrators": patch_integrators(targets["integrators"]),
-        "transport": patch_transport(targets["transport"]),
-        "sample": patch_sample(targets["sample"]),
-    }
+    changed = {}
+    for label, path in targets.items():
+        print(f"Patching {label}: {path}")
+        if label == "integrators":
+            changed[label] = patch_integrators(path)
+        elif label == "transport":
+            changed[label] = patch_transport(path)
+        elif label == "sample":
+            changed[label] = patch_sample(path)
     print(changed)
 
 
